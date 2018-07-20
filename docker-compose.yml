@@ -1,0 +1,24 @@
+version: '3'
+services:
+  conduit:
+    build: .
+    environment:
+      - REDIS_ADDR=redis:6379
+    networks:
+      - internal
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:4.0.10-alpine
+    command: ["redis-server"]
+    hostname: redis
+    ports:
+      - 6379:6379
+    networks:
+      - internal
+    volumes:
+      - ./data:/data
+
+networks:
+  internal:
