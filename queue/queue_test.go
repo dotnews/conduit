@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-var q = queue.New(1 * time.Nanosecond)
+var q = queue.New(1 * time.Millisecond)
 
 type HandlerMock struct {
 	mock.Mock
 }
 
-func (m *HandlerMock) handle(message string) error {
+func (m *HandlerMock) handleFunc(message []byte) error {
 	args := m.Called(message)
 	return args.Error(0)
 }
@@ -30,13 +30,13 @@ func TestMain(m *testing.M) {
 func TestPubSub(t *testing.T) {
 	m := new(HandlerMock)
 
-	q.Subscribe("test", m.handle)
-	m.AssertNotCalled(t, "handle")
+	q.Subscribe("test", m.handleFunc)
+	m.AssertNotCalled(t, "handleFunc")
 
-	m.On("handle", "message").Return(nil)
-	q.Publish("test", "message")
+	m.On("handleFunc", []byte("message")).Return(nil)
+	q.Publish("test", []byte("message"))
 	time.Sleep(100 * time.Millisecond)
-	m.AssertCalled(t, "handle", "message")
+	m.AssertCalled(t, "handleFunc", []byte("message"))
 
 	assert.Equal(t, int64(0), q.Client.LLen("test").Val())
 	assert.Equal(t, int64(0), q.Client.LLen("test/proc").Val())
@@ -45,13 +45,13 @@ func TestPubSub(t *testing.T) {
 func TestPubSubFailure(t *testing.T) {
 	m := new(HandlerMock)
 
-	q.Subscribe("test", m.handle)
-	m.AssertNotCalled(t, "handle")
+	q.Subscribe("test", m.handleFunc)
+	m.AssertNotCalled(t, "handleFunc")
 
-	m.On("handle", "message").Return(errors.New(""))
-	q.Publish("test", "message")
+	m.On("handleFunc", []byte("message")).Return(errors.New(""))
+	q.Publish("test", []byte("message"))
 	time.Sleep(100 * time.Millisecond)
-	m.AssertCalled(t, "handle", "message")
+	m.AssertCalled(t, "handleFunc", []byte("message"))
 
 	assert.Equal(t, int64(0), q.Client.LLen("test").Val())
 	assert.Equal(t, int64(1), q.Client.LLen("test/proc").Val())

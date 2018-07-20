@@ -19,7 +19,7 @@ type Queue struct {
 }
 
 // HandleFunc for event messages
-type HandleFunc func(message string) error
+type HandleFunc func(message []byte) error
 
 // New creates a new queue
 func New(interval time.Duration) *Queue {
@@ -34,39 +34,37 @@ func New(interval time.Duration) *Queue {
 	return q
 }
 
-// Publish event messages
-func (q *Queue) Publish(event string, messages ...string) error {
-	err := q.Client.LPush(event, messages).Err()
+// Publish message
+func (q *Queue) Publish(event string, message []byte) error {
+	err := q.Client.LPush(event, message).Err()
 	if err != nil {
 		glog.Errorf(
-			"Failed publishing to event: %s, error: %v, messages: %+v",
+			"Failed publishing message; event: %s, error: %v, message: %s",
 			event,
 			err,
-			messages,
+			string(message),
 		)
 	}
 	return err
 }
 
-// Subscribe to event messages
+// Subscribe to event
 func (q *Queue) Subscribe(event string, handle HandleFunc) {
 	q.Subscribers[event] = handle
 }
 
 func (q *Queue) listen() {
 	ticker := time.NewTicker(q.Interval)
-
 	for range ticker.C {
-		for event, handler := range q.Subscribers {
-			q.proc(event, handler)
+		for event, handleFunc := range q.Subscribers {
+			q.proc(event, handleFunc)
 		}
 	}
 }
 
-func (q *Queue) proc(event string, handle HandleFunc) {
+func (q *Queue) proc(event string, handleFunc HandleFunc) {
 	proc := event + procSuffix
 	message, err := q.Client.RPopLPush(event, proc).Bytes()
-
 	if err != nil {
 		glog.Errorf(
 			"Failed reading message; event: %s, error: %v",
@@ -76,12 +74,7 @@ func (q *Queue) proc(event string, handle HandleFunc) {
 		return
 	}
 
-	if message == nil {
-		return
-	}
-
-	err = handle(string(message))
-
+	err = handleFunc(message)
 	if err != nil {
 		glog.Errorf(
 			"Failed handling message; proc: %s, error: %v, message: %s",
@@ -93,7 +86,6 @@ func (q *Queue) proc(event string, handle HandleFunc) {
 	}
 
 	err = q.Client.LRem(proc, 1, message).Err()
-
 	if err != nil {
 		glog.Errorf(
 			"Failed acknowledging message; proc: %s, error: %v, message: %s",

@@ -3,7 +3,7 @@ default: test
 .PHONY: test redis run compose compose.up
 
 test:
-	@REDIS_ADDR=localhost:6379 GOCACHE=off go test ./...
+	@REDIS_ADDR=localhost:6379 GOCACHE=off go test ./... -stderrthreshold=FATAL
 
 redis:
 	@docker-compose up redis
