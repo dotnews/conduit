@@ -1,18 +1,24 @@
 default: test
 
-.PHONY: test redis run compose compose.up
+.PHONY: test run compose.build compose.up compose.upb compose.redis
 
 test:
-	@REDIS_ADDR=localhost:6379 GOCACHE=off go test ./... -stderrthreshold=FATAL
-
-redis:
-	@docker-compose up redis
+	@REDIS_ADDR=localhost:6379 \
+	GOCACHE=off \
+	go test ./...
 
 run:
-	@REDIS_ADDR=localhost:6379 go run main.go -logtostderr=true
+	@CRAWLER_ROOT=$(PWD)/../crawler \
+	REDIS_ADDR=localhost:6379 \
+	go run main.go -logtostderr=true
 
-compose:
+compose.build:
 	@docker-compose build
 
-compose.up: compose
+compose.up:
 	@docker-compose up
+
+compose.upb: compose.build compose.up
+
+compose.redis:
+	@docker-compose up redis

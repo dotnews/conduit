@@ -1,0 +1,12 @@
+---
+id: sample
+
+stages:
+- process: 'echo "[{\"id\": 1}, {\"id\": 2}]"'
+  subscribe: index
+  publish: list
+  pipe: each
+
+- process: xargs echo
+  subscribe: list
+  publish: item

@@ -3,6 +3,8 @@ services:
   conduit:
     build: .
     environment:
+      - CHROMIUM_BROWSER=/usr/bin/chromium-browser
+      - CRAWLER_ROOT=/crawler
       - REDIS_ADDR=redis:6379
     networks:
       - internal
