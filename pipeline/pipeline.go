@@ -14,7 +14,7 @@ import (
 )
 
 // PipeEach configures the stage to handle output as JSON array
-// piping each element independently into the next stage
+// piping each array element independently into the next stage
 const PipeEach = Pipe("each")
 
 // Pipeline metadata and runtime backed by queue
@@ -57,33 +57,61 @@ func (p *Pipeline) Run() {
 		stage := stage // closure-safety
 		event := p.getEvent(stage.Subscribe)
 		glog.Infof("Subscribing to event: %s", event)
+
 		p.Queue.Subscribe(event, func(message []byte) error {
 			out, err := os.Run(stage.Process, message)
 			if err != nil {
-				glog.Errorf("Failed processing message; event: %s, error: %v, message: %s", event, err, string(message))
+				glog.Errorf(
+					"Failed processing message; event: %s, error: %v, message: %s",
+					event,
+					err,
+					string(message),
+				)
 				return err
 			}
+
 			next := p.getEvent(stage.Publish)
 			count, err := p.pipe(next, stage.Pipe, out)
 			if err != nil {
-				glog.Errorf("Failed piping message; event: %s, next: %s, error: %v, message: %s", event, next, err, string(message))
+				glog.Errorf(
+					"Failed piping message; event: %s, next: %s, error: %v, message: %s",
+					event,
+					next,
+					err,
+					string(message),
+				)
 				return err
 			}
-			glog.Infof("Pipeline: %s, sub: %s, pub: %s, piped: %d", p.Meta.ID, stage.Subscribe, stage.Publish, count)
+
+			glog.Infof(
+				"Pipeline: %s, sub: %s, pub: %s, piped: %d",
+				p.Meta.ID,
+				stage.Subscribe,
+				stage.Publish,
+				count,
+			)
+
 			return nil
 		})
 	}
 }
 
-// Pipe output into next stage
+// Pipe message(s) into next stage
 func (p *Pipeline) pipe(event string, pipe Pipe, message []byte) (int, error) {
 	if pipe == PipeEach {
 		return p.pipeEach(event, message)
 	}
+
 	if err := p.Queue.Publish(event, message); err != nil {
-		glog.Errorf("Failed publishing message; event: %s, error: %v, message: %s", event, err, string(message))
+		glog.Errorf(
+			"Failed publishing message; event: %s, error: %v, message: %s",
+			event,
+			err,
+			string(message),
+		)
 		return 0, err
 	}
+
 	return 1, nil
 }
 
@@ -91,20 +119,42 @@ func (p *Pipeline) pipe(event string, pipe Pipe, message []byte) (int, error) {
 func (p *Pipeline) pipeEach(event string, message []byte) (int, error) {
 	var pipeArray PipeArray
 	if err := json.Unmarshal(message, &pipeArray); err != nil {
-		glog.Errorf("Failed parsing message; event: %s, error: %v, message: %s", event, err, string(message))
+		glog.Errorf(
+			"Failed parsing message; event: %s, error: %v, message: %s",
+			event,
+			err,
+			string(message),
+		)
 		return 0, err
 	}
+
 	for i, m := range pipeArray {
 		message, err := json.Marshal(m)
 		if err != nil {
-			glog.Errorf("Failed parsing message %d/%d; event: %s, error: %v, message: %s", i+1, len(pipeArray), event, err, string(message))
+			glog.Errorf(
+				"Failed parsing message %d/%d; event: %s, error: %v, message: %s",
+				i+1,
+				len(pipeArray),
+				event,
+				err,
+				string(message),
+			)
 			return 0, err
 		}
+
 		if err := p.Queue.Publish(event, message); err != nil {
-			glog.Errorf("Failed publishing message; event: %s, error: %v, message: %s", event, err, string(message))
+			glog.Errorf(
+				"Failed publishing message %d/%d; event: %s, error: %v, message: %s",
+				i+1,
+				len(pipeArray),
+				event,
+				err,
+				string(message),
+			)
 			return 0, err
 		}
 	}
+
 	return len(pipeArray), nil
 }
 
@@ -119,12 +169,15 @@ func load(file, cRoot string) *Meta {
 	if err != nil {
 		glog.Fatalf("Failed loading pipeline file: %s, error: %v", file, err)
 	}
+
 	var meta Meta
 	if err = yaml.Unmarshal(bytes, &meta); err != nil {
 		glog.Fatalf("Failed parsing pipeline file: %s, error: %v", file, err)
 	}
+
 	for _, stage := range meta.Stages {
 		stage.Process = strings.Replace(stage.Process, "$CRAWLER_ROOT", cRoot, 1)
 	}
+
 	return &meta
 }
