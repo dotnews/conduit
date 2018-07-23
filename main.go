@@ -21,19 +21,19 @@ func main() {
 		glog.Infof("Loading pipeline: %s", absPath)
 
 		pipeline.New(
+			filepath.Dir(absPath),
 			absPath,
 			queue.New(1*time.Second),
-			cRoot,
 		).Run()
 	}
 
 	select {}
 }
 
-func findPipelines(root string) []string {
+func findPipelines(cRoot string) []string {
 	pipelines := []string{}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 
+	err := filepath.Walk(cRoot, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() && info.Name() == "pipeline.yml" {
 			pipelines = append(pipelines, path)
 		}
@@ -42,7 +42,7 @@ func findPipelines(root string) []string {
 	})
 
 	if err != nil {
-		glog.Fatalf("Failed walking directory: %s", root)
+		glog.Fatalf("Failed walking directory: %s", cRoot)
 	}
 
 	return pipelines

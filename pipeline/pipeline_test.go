@@ -11,7 +11,7 @@ import (
 )
 
 var q = queue.New(1 * time.Millisecond)
-var p = pipeline.New("sample.yml", q, "")
+var p = pipeline.New(".", "sample.yml", q)
 
 func TestNew(t *testing.T) {
 	assert.Equal(t, "sample", p.Meta.ID)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"strings"
 
 	"github.com/golang/glog"
 
@@ -19,6 +18,7 @@ const PipeEach = Pipe("each")
 
 // Pipeline metadata and runtime backed by queue
 type Pipeline struct {
+	Root  string
 	Meta  *Meta
 	Queue *queue.Queue
 }
@@ -44,9 +44,10 @@ type PipeArray []interface{}
 type Pipe string
 
 // New creates a new pipeline
-func New(file string, q *queue.Queue, cRoot string) *Pipeline {
+func New(root, file string, q *queue.Queue) *Pipeline {
 	return &Pipeline{
-		Meta:  load(file, cRoot),
+		Root:  root,
+		Meta:  load(file),
 		Queue: q,
 	}
 }
@@ -59,7 +60,7 @@ func (p *Pipeline) Run() {
 		glog.Infof("Subscribing to event: %s", event)
 
 		p.Queue.Subscribe(event, func(message []byte) error {
-			out, err := os.Run(stage.Process, message)
+			out, err := os.Run(stage.Process, p.Root, message)
 			if err != nil {
 				glog.Errorf(
 					"Failed processing message; event: %s, error: %v, message: %s",
@@ -128,8 +129,8 @@ func (p *Pipeline) pipeEach(event string, message []byte) (int, error) {
 		return 0, err
 	}
 
-	for i, m := range pipeArray {
-		message, err := json.Marshal(m)
+	for i, el := range pipeArray {
+		m, err := json.Marshal(el)
 		if err != nil {
 			glog.Errorf(
 				"Failed parsing message %d/%d; event: %s, error: %v, message: %s",
@@ -137,19 +138,19 @@ func (p *Pipeline) pipeEach(event string, message []byte) (int, error) {
 				len(pipeArray),
 				event,
 				err,
-				string(message),
+				string(m),
 			)
 			return 0, err
 		}
 
-		if err := p.Queue.Publish(event, message); err != nil {
+		if err := p.Queue.Publish(event, m); err != nil {
 			glog.Errorf(
 				"Failed publishing message %d/%d; event: %s, error: %v, message: %s",
 				i+1,
 				len(pipeArray),
 				event,
 				err,
-				string(message),
+				string(m),
 			)
 			return 0, err
 		}
@@ -164,7 +165,7 @@ func (p *Pipeline) getEvent(suffix string) string {
 }
 
 // Load pipeline YAML file
-func load(file, cRoot string) *Meta {
+func load(file string) *Meta {
 	bytes, err := ioutil.ReadFile(file)
 	if err != nil {
 		glog.Fatalf("Failed loading pipeline file: %s, error: %v", file, err)
@@ -173,10 +174,6 @@ func load(file, cRoot string) *Meta {
 	var meta Meta
 	if err = yaml.Unmarshal(bytes, &meta); err != nil {
 		glog.Fatalf("Failed parsing pipeline file: %s, error: %v", file, err)
-	}
-
-	for _, stage := range meta.Stages {
-		stage.Process = strings.Replace(stage.Process, "$CRAWLER_ROOT", cRoot, 1)
 	}
 
 	return &meta
