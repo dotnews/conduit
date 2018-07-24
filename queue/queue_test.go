@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-var q = queue.New(1 * time.Millisecond)
-
 type HandlerMock struct {
 	mock.Mock
 }
@@ -22,37 +20,46 @@ func (m *HandlerMock) handleFunc(message []byte) error {
 	return args.Error(0)
 }
 
+func clean() {
+	q := queue.New(1 * time.Hour)
+	q.Client.Del(q.Client.Keys("test/queue/*").Val()...)
+}
+
 func TestMain(m *testing.M) {
-	q.Client.Del("test", "test/proc")
-	os.Exit(m.Run())
+	clean()
+	code := m.Run()
+	clean()
+	os.Exit(code)
 }
 
 func TestPubSub(t *testing.T) {
+	q := queue.New(1 * time.Millisecond)
 	m := new(HandlerMock)
 
-	q.Subscribe("test", m.handleFunc)
+	q.Subscribe("test/queue/pubsub", m.handleFunc)
 	m.AssertNotCalled(t, "handleFunc")
 
 	m.On("handleFunc", []byte("message")).Return(nil)
-	q.Publish("test", []byte("message"))
+	q.Publish("test/queue/pubsub", []byte("message"))
 	time.Sleep(100 * time.Millisecond)
 	m.AssertCalled(t, "handleFunc", []byte("message"))
 
-	assert.Equal(t, int64(0), q.Client.LLen("test").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/proc").Val())
+	assert.Equal(t, int64(0), q.Client.LLen("test/queue/pubsub").Val())
+	assert.Equal(t, int64(0), q.Client.LLen("test/queue/pubsub/proc").Val())
 }
 
 func TestPubSubFailure(t *testing.T) {
+	q := queue.New(1 * time.Millisecond)
 	m := new(HandlerMock)
 
-	q.Subscribe("test", m.handleFunc)
+	q.Subscribe("test/queue/fail", m.handleFunc)
 	m.AssertNotCalled(t, "handleFunc")
 
 	m.On("handleFunc", []byte("message")).Return(errors.New(""))
-	q.Publish("test", []byte("message"))
+	q.Publish("test/queue/fail", []byte("message"))
 	time.Sleep(100 * time.Millisecond)
 	m.AssertCalled(t, "handleFunc", []byte("message"))
 
-	assert.Equal(t, int64(0), q.Client.LLen("test").Val())
-	assert.Equal(t, int64(1), q.Client.LLen("test/proc").Val())
+	assert.Equal(t, int64(0), q.Client.LLen("test/queue/fail").Val())
+	assert.Equal(t, int64(1), q.Client.LLen("test/queue/fail/proc").Val())
 }
