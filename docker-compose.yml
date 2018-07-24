@@ -4,7 +4,7 @@ services:
     build: .
     environment:
       - CHROMIUM_BROWSER=/usr/bin/chromium-browser
-      - CRAWLER_ROOT=/crawler
+      - PIPELINE_ROOT=/crawler/src
       - REDIS_ADDR=redis:6379
     networks:
       - internal

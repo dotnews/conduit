@@ -2,12 +2,14 @@ package main
 
 import (
 	"flag"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/dotnews/conduit/pipeline"
 	"github.com/dotnews/conduit/queue"
+	"gopkg.in/yaml.v2"
 
 	"github.com/golang/glog"
 )
@@ -15,14 +17,13 @@ import (
 func main() {
 	flag.Parse()
 	glog.Info("Running conduit")
-	cRoot := os.Getenv("CRAWLER_ROOT")
 
-	for _, absPath := range findPipelines(cRoot) {
+	for _, absPath := range findPipelines(os.Getenv("PIPELINE_ROOT")) {
 		glog.Infof("Loading pipeline: %s", absPath)
 
 		pipeline.New(
 			filepath.Dir(absPath),
-			absPath,
+			loadPipeline(absPath),
 			queue.New(1*time.Second),
 		).Run()
 	}
@@ -30,10 +31,11 @@ func main() {
 	select {}
 }
 
-func findPipelines(cRoot string) []string {
+// Find pipeline YAML files in base directory
+func findPipelines(root string) []string {
 	pipelines := []string{}
 
-	err := filepath.Walk(cRoot, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() && info.Name() == "pipeline.yml" {
 			pipelines = append(pipelines, path)
 		}
@@ -42,8 +44,23 @@ func findPipelines(cRoot string) []string {
 	})
 
 	if err != nil {
-		glog.Fatalf("Failed walking directory: %s", cRoot)
+		glog.Fatalf("Failed walking directory: %s", root)
 	}
 
 	return pipelines
+}
+
+// Load pipeline YAML file
+func loadPipeline(file string) *pipeline.Meta {
+	bytes, err := ioutil.ReadFile(file)
+	if err != nil {
+		glog.Fatalf("Failed loading pipeline file: %s, error: %v", file, err)
+	}
+
+	var meta pipeline.Meta
+	if err = yaml.Unmarshal(bytes, &meta); err != nil {
+		glog.Fatalf("Failed parsing pipeline file: %s, error: %v", file, err)
+	}
+
+	return &meta
 }

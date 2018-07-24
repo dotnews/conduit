@@ -3,13 +3,11 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 
 	"github.com/golang/glog"
 
 	"github.com/dotnews/conduit/os"
 	"github.com/dotnews/conduit/queue"
-	"gopkg.in/yaml.v2"
 )
 
 // PipeEach configures the stage to handle output as JSON array
@@ -44,10 +42,10 @@ type PipeArray []interface{}
 type Pipe string
 
 // New creates a new pipeline
-func New(root, file string, q *queue.Queue) *Pipeline {
+func New(root string, meta *Meta, q *queue.Queue) *Pipeline {
 	return &Pipeline{
 		Root:  root,
-		Meta:  load(file),
+		Meta:  meta,
 		Queue: q,
 	}
 }
@@ -162,19 +160,4 @@ func (p *Pipeline) pipeEach(event string, message []byte) (int, error) {
 // Get event name prefixed with pipeline ID
 func (p *Pipeline) getEvent(suffix string) string {
 	return fmt.Sprintf("%s/%s", p.Meta.ID, suffix)
-}
-
-// Load pipeline YAML file
-func load(file string) *Meta {
-	bytes, err := ioutil.ReadFile(file)
-	if err != nil {
-		glog.Fatalf("Failed loading pipeline file: %s, error: %v", file, err)
-	}
-
-	var meta Meta
-	if err = yaml.Unmarshal(bytes, &meta); err != nil {
-		glog.Fatalf("Failed parsing pipeline file: %s, error: %v", file, err)
-	}
-
-	return &meta
 }

@@ -8,7 +8,7 @@ test:
 	go test ./...
 
 run:
-	@CRAWLER_ROOT=$(PWD)/../crawler \
+	@PIPELINE_ROOT=$(PWD)/../crawler/src \
 	REDIS_ADDR=localhost:6379 \
 	go run main.go -logtostderr=true
 
