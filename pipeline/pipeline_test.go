@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-redis/redis"
 	"github.com/golang/glog"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
@@ -51,23 +52,23 @@ stages:
   subscribe: index
   publish: item`
 
-func newPipeline(root, s string, q *queue.Queue) *pipeline.Pipeline {
-	var meta pipeline.Meta
-	if err := yaml.Unmarshal([]byte(s), &meta); err != nil {
-		glog.Fatalf("Failed parsing pipeline: %v\n%s", err, s)
+func newPipeline(root, meta string, q *queue.Queue) *pipeline.Pipeline {
+	var m pipeline.Meta
+	if err := yaml.Unmarshal([]byte(meta), &m); err != nil {
+		glog.Fatalf("Failed parsing pipeline: %v\n%s", err, meta)
 	}
-	return pipeline.New(root, &meta, q)
+	return pipeline.New(root, &m, q)
 }
 
-func clean() {
-	q := queue.New(1 * time.Hour)
-	q.Client.Del(q.Client.Keys("test/pipeline/*").Val()...)
+func clean(c *redis.Client) {
+	c.Del(c.Keys("test/pipeline/*").Val()...)
 }
 
 func TestMain(m *testing.M) {
-	clean()
+	c := queue.NewClient()
+	clean(c)
 	code := m.Run()
-	clean()
+	clean(c)
 	os.Exit(code)
 }
 
@@ -86,15 +87,26 @@ func TestPipe(t *testing.T) {
 	assert.Equal(t, pipeline.Pipe(""), stage.Pipe)
 
 	p.Run()
+	done := make(chan bool)
+
+	q.Subscribe("test/pipeline/pipe/index", func(message []byte) error {
+		close(done)
+		return nil
+	})
+
 	q.Publish("test/pipeline/pipe/index", []byte(""))
-	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/index").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/index/proc").Val())
-	assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/pipe/item").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/item/proc").Val())
+	select {
+	case <-done:
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/index").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/index/proc").Val())
+		assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/pipe/item").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/pipe/item/proc").Val())
+		assert.Equal(t, []string{"foo\n"}, q.Client.LRange("test/pipeline/pipe/item", 0, 0).Val())
 
-	assert.Equal(t, []string{"foo\n"}, q.Client.LRange("test/pipeline/pipe/item", 0, 0).Val())
+	case <-time.After(100 * time.Millisecond):
+		assert.Fail(t, "Timeout")
+	}
 }
 
 func TestPipeEach(t *testing.T) {
@@ -118,18 +130,40 @@ func TestPipeEach(t *testing.T) {
 	assert.Equal(t, pipeline.Pipe(""), stage2.Pipe)
 
 	p.Run()
+	messages := make(chan string)
+
+	q.Subscribe("test/pipeline/each/list", func(message []byte) error {
+		messages <- string(message)
+		return nil
+	})
+
 	q.Publish("test/pipeline/each/index", []byte(""))
-	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/index").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/index/proc").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/list").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/list/proc").Val())
-	assert.Equal(t, int64(2), q.Client.LLen("test/pipeline/each/item").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/item/proc").Val())
+	select {
+	case message := <-messages:
+		switch message {
 
-	assert.Equal(t, []string{"{id:2}\n"}, q.Client.LRange("test/pipeline/each/item", 0, 0).Val())
-	assert.Equal(t, []string{"{id:1}\n"}, q.Client.LRange("test/pipeline/each/item", 1, 1).Val())
+		case "{\"id\":1}":
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/list").Val())
+			assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/each/list/proc").Val())
+
+		case "{\"id\":2}":
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/index").Val())
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/index/proc").Val())
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/list").Val())
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/list/proc").Val())
+			assert.Equal(t, int64(2), q.Client.LLen("test/pipeline/each/item").Val())
+			assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/each/item/proc").Val())
+			assert.Equal(t, []string{"{id:2}\n"}, q.Client.LRange("test/pipeline/each/item", 0, 0).Val())
+			assert.Equal(t, []string{"{id:1}\n"}, q.Client.LRange("test/pipeline/each/item", 1, 1).Val())
+
+		default:
+			assert.Failf(t, "Unexpected message", message)
+		}
+
+	case <-time.After(100 * time.Millisecond):
+		assert.Fail(t, "Timeout")
+	}
 }
 
 func TestProcessFail(t *testing.T) {
@@ -147,13 +181,25 @@ func TestProcessFail(t *testing.T) {
 	assert.Equal(t, pipeline.Pipe(""), stage.Pipe)
 
 	p.Run()
-	q.Publish("test/pipeline/fail/index", []byte(""))
-	time.Sleep(100 * time.Millisecond)
+	done := make(chan bool)
 
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/index").Val())
-	assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/fail/index/proc").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/item").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/item/proc").Val())
+	q.Subscribe("test/pipeline/fail/index", func(message []byte) error {
+		close(done)
+		return nil
+	})
+
+	q.Publish("test/pipeline/fail/index", []byte(""))
+
+	select {
+	case <-done:
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/index").Val())
+		assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/fail/index/proc").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/item").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/fail/item/proc").Val())
+
+	case <-time.After(100 * time.Millisecond):
+		assert.Fail(t, "Timeout")
+	}
 }
 
 func TestDirectoryContext(t *testing.T) {
@@ -172,13 +218,24 @@ func TestDirectoryContext(t *testing.T) {
 	assert.Equal(t, pipeline.Pipe(""), stage.Pipe)
 
 	p.Run()
+	done := make(chan bool)
+
+	q.Subscribe("test/pipeline/dir/index", func(message []byte) error {
+		close(done)
+		return nil
+	})
+
 	q.Publish("test/pipeline/dir/index", []byte(""))
-	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/index").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/index/proc").Val())
-	assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/dir/item").Val())
-	assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/item/proc").Val())
+	select {
+	case <-done:
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/index").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/index/proc").Val())
+		assert.Equal(t, int64(1), q.Client.LLen("test/pipeline/dir/item").Val())
+		assert.Equal(t, int64(0), q.Client.LLen("test/pipeline/dir/item/proc").Val())
+		assert.Contains(t, q.Client.LRange("test/pipeline/dir/item", 0, 0).Val()[0], strings.Trim(tmp, "/"))
 
-	assert.Contains(t, q.Client.LRange("test/pipeline/dir/item", 0, 0).Val()[0], strings.Trim(tmp, "/"))
+	case <-time.After(100 * time.Millisecond):
+		assert.Fail(t, "Timeout")
+	}
 }
